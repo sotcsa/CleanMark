@@ -4,6 +4,8 @@ URL-tisztító és könyvjelző-kezelő. Eltávolítja a linkekből a követők�
 
 A felület magyar nyelvű.
 
+**Élő oldal:** https://sotcsa.github.io/CleanMark/
+
 ## Részek
 
 | Rész | Hely | Leírás |
@@ -40,6 +42,10 @@ npm run preview   # a build kiszolgálása helyben
 npm run lint      # oxlint
 ```
 
+### Publikálás
+
+A `main` branchre történő minden push után a `.github/workflows/deploy.yml` GitHub Actions workflow lebuildeli az oldalt, és kiteszi GitHub Pagesre (https://sotcsa.github.io/CleanMark/). Kézzel is indítható az Actions fülön. Mivel az oldal a `/CleanMark/` útvonalon fut, a `vite.config.js`-ben `base: '/CleanMark/'` van beállítva.
+
 ## Adattárolás
 
 - **Webalkalmazás:** böngésző `localStorage`, `cleanmark-bookmarks` kulccsal (JSON tömb). Az adatok csak abban a böngészőben érhetők el, ahol mentetted őket; böngészőadatok törlésekor elvesznek, ezért érdemes időnként JSON-ba exportálni. Ugyanazon böngésző több fülén automatikusan szinkronban maradnak.
@@ -48,7 +54,7 @@ npm run lint      # oxlint
 ## Mobil és gyorsmentés
 
 - **URL-paraméter:** a webalkalmazás az `?add_url=<url>` (vagy `?url=<url>`) paraméterrel megnyitva automatikusan átveszi és megtisztítja a linket.
-- **iOS Rövidítések:** egy „URL megnyitása” művelettel, például `https://<app-cím>/?add_url=[Vágólap]`, egyetlen érintéssel menthető a link a Megosztás menüből.
+- **iOS Rövidítések:** egy „URL megnyitása” művelettel, például `https://sotcsa.github.io/CleanMark/?add_url=[Vágólap]`, egyetlen érintéssel menthető a link a Megosztás menüből.
 - **Bookmarklet:** a Plugin fülről a könyvjelzősávra húzható. Bármely oldalon megtisztítja az aktuális URL-t, és a vágólapra másolja (mobil böngészőben is működik).
 
 ## Projektstruktúra
