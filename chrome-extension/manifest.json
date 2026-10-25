@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "CleanMark - URL Cleaner & Bookmark",
+  "version": "1.0",
+  "description": "Eltávolítja a követőkódokat (fbclid, gclid, utm) és kinyeri a valódi forrást.",
+  "permissions": ["activeTab", "storage", "clipboardWrite"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
