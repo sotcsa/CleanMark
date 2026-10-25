@@ -1,0 +1,9 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Mindenki csak a saját könyvjelzőit olvashatja és írhatja
+    match /users/{userId}/bookmarks/{bookmarkId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

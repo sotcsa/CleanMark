@@ -10,7 +10,7 @@ A felület magyar nyelvű.
 
 | Rész | Hely | Leírás |
 |---|---|---|
-| Webalkalmazás | `src/` | React 19 + Vite 8 + Tailwind CSS 4. Az adatokat a böngésző `localStorage`-ában tárolja, nincs szerver. A teljes logika a `src/App.jsx` fájlban van. |
+| Webalkalmazás | `src/` | React 19 + Vite 8 + Tailwind CSS 4, Firebase (Google-bejelentkezés + Firestore) szinkronnal. A teljes logika a `src/App.jsx` fájlban van. |
 | Chrome-bővítmény | `chrome-extension/` | Manifest V3 popup, build nélkül betölthető. Önálló, nem kommunikál a webalkalmazással. |
 | Mobil | – | Nincs natív app. A webalkalmazás reszponzív (mobilon alsó navigáció), és bookmarklettel vagy iOS Rövidítéssel is használható (lásd lent). |
 
@@ -26,9 +26,9 @@ A felület magyar nyelvű.
 
 1. Nyisd meg a `chrome://extensions` oldalt, és kapcsold be a **Fejlesztői módot**.
 2. **Kicsomagolt bővítmény betöltése**, majd válaszd ki a `chrome-extension/` mappát.
-3. A bővítmény ikonjára kattintva a popup megtisztítja az aktuális fül URL-jét. A **Mentés** gomb a vágólapra másolja a tiszta linket, és elmenti a könyvjelzőt a `chrome.storage.local`-ba.
+3. A bővítmény ikonjára kattintva a popup megtisztítja az aktuális fül URL-jét. A **Másolás és mentés** gomb a vágólapra másolja a tiszta linket, és új fülön megnyitja a webappot (`?add_url=…&title=…&tags=…`), ahol egy kattintással menthető. Így a bővítményből mentett linkek is a közös, szinkronizált listába kerülnek.
 
-Jogosultságok: `activeTab`, `storage`, `clipboardWrite`. A manifestben nincs ikon megadva. Nem http(s) oldalakon (pl. `chrome://`) a mentés le van tiltva.
+Jogosultságok: `activeTab`, `clipboardWrite`. A manifestben nincs ikon megadva. Nem http(s) oldalakon (pl. `chrome://`) a mentés le van tiltva.
 
 ### Webalkalmazás
 
@@ -48,8 +48,15 @@ A `main` branchre történő minden push után a `.github/workflows/deploy.yml` 
 
 ## Adattárolás
 
-- **Webalkalmazás:** böngésző `localStorage`, `cleanmark-bookmarks` kulccsal (JSON tömb). Az adatok csak abban a böngészőben érhetők el, ahol mentetted őket; böngészőadatok törlésekor elvesznek, ezért érdemes időnként JSON-ba exportálni. Ugyanazon böngésző több fülén automatikusan szinkronban maradnak.
-- **Chrome-bővítmény:** `chrome.storage.local`, `bookmarks` kulccsal. Nincs szinkronizálva a webalkalmazással.
+- **Bejelentkezve (Google-fiók):** Firestore, a `users/{uid}/bookmarks/{id}` útvonalon. Minden eszközön (mobil, asztali böngésző) ugyanaz a lista, élő szinkronnal. Offline is lehet menteni, a kapcsolat visszatérésekor feltöltődik.
+- **Bejelentkezés nélkül:** böngésző `localStorage`, `cleanmark-bookmarks` kulccsal. Csak az adott böngészőben érhető el. Első bejelentkezéskor ezek a könyvjelzők automatikusan felkerülnek a fiókba.
+- **Chrome-bővítmény:** nem tárol semmit, a webappon keresztül ment.
+
+### Firebase
+
+- Projekt: `cleanmark-sotcsa` (Spark, ingyenes csomag). A webes config a `src/App.jsx` elején van; ez nem titkos adat.
+- Bejelentkezés: Authentication → Google szolgáltató. Az engedélyezett domainek között szerepelnie kell a `sotcsa.github.io`-nak (és helyi fejlesztéshez a `localhost`-nak).
+- Hozzáférés: a `firestore.rules` szerint mindenki csak a saját könyvjelzőit olvashatja és írhatja. Módosítás után a Firebase konzolban (Firestore → Rules) kell közzétenni.
 
 ## Mobil és gyorsmentés
 
@@ -63,13 +70,15 @@ A `main` branchre történő minden push után a `.github/workflows/deploy.yml` 
 chrome-extension/   manifest.json, popup.html, popup.js
 public/             favicon.svg, icons.svg
 src/
-  App.jsx           teljes alkalmazás: URL-elemző motor, localStorage tárolás, UI
+  App.jsx           teljes alkalmazás: URL-elemző motor, Firebase/localStorage tárolás, UI
   main.jsx          React belépési pont
   index.css         Tailwind import (@import "tailwindcss")
 index.html
 vite.config.js
 postcss.config.js   Tailwind 4 (@tailwindcss/postcss)
 .oxlintrc.json
+firestore.rules     Firestore hozzáférési szabályok
+.github/workflows/  GitHub Pages publikálás
 ```
 
 ## Tisztítási szabályok

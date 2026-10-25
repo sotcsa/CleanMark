@@ -1,3 +1,4 @@
+const APP_URL = 'https://sotcsa.github.io/CleanMark/';
 const TRACKING_PARAMS = ['fbclid','gclid','dclid','msclkid','twclid','igshid','ttclid','si','mc_cid','mc_eid','_hsenc','_hsmi','rb_clickid','s_kwcid','vero_id'];
 const YOUTUBE_PARAMS = ['feature','pp'];
 
@@ -50,18 +51,14 @@ chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
   document.getElementById('cleanUrl').textContent = cleanUrl;
   document.getElementById('titleInput').value = tab.title || '';
 
+  // A mentés a webappban történik, így minden eszközön ugyanaz a lista látszik
   saveBtn.onclick = async () => {
     await navigator.clipboard.writeText(cleanUrl);
-    const { bookmarks = [] } = await chrome.storage.local.get('bookmarks');
-    bookmarks.unshift({
-      id: Date.now(),
+    const params = new URLSearchParams({
+      add_url: tab.url,
       title: document.getElementById('titleInput').value,
-      cleanUrl,
-      source,
-      tags: document.getElementById('tagsInput').value.split(',').map(t => t.trim()).filter(Boolean),
-      createdAt: new Date().toISOString()
+      tags: document.getElementById('tagsInput').value
     });
-    await chrome.storage.local.set({ bookmarks });
-    saveBtn.textContent = '✓ Mentve & vágólapra másolva!';
+    chrome.tabs.create({ url: `${APP_URL}?${params}` });
   };
 });

@@ -37,12 +37,52 @@ import {
   Mail,
   Video,
   MessageSquare,
-  Terminal
+  Terminal,
+  LogIn,
+  LogOut,
+  Cloud
 } from 'lucide-react';
 
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged
+} from 'firebase/auth';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  collection,
+  doc,
+  updateDoc,
+  deleteDoc,
+  writeBatch,
+  onSnapshot
+} from 'firebase/firestore';
+
 // ==========================================
-// 1. HELYI TÁROLÁS (localStorage)
+// 1. FIREBASE (Google bejelentkezés + Firestore szinkron) ÉS HELYI TÁROLÁS
 // ==========================================
+// A webes Firebase config nem titok; a hozzáférést a firestore.rules szabályozza.
+const firebaseApp = initializeApp({
+  apiKey: 'AIzaSyC_voTejx5w8NKGAaWP-LGAVz4z-h4fsJw',
+  authDomain: 'cleanmark-sotcsa.firebaseapp.com',
+  projectId: 'cleanmark-sotcsa',
+  storageBucket: 'cleanmark-sotcsa.firebasestorage.app',
+  messagingSenderId: '308166073507',
+  appId: '1:308166073507:web:bce755fe68a32c8a63b316'
+});
+const auth = getAuth(firebaseApp);
+// Offline gyorsítótár: net nélkül is menthető, később szinkronizál
+const db = initializeFirestore(firebaseApp, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+const bookmarksCol = (uid) => collection(db, 'users', uid, 'bookmarks');
+
+// Bejelentkezés nélkül a könyvjelzők a localStorage-ban vannak; belépéskor felkerülnek a fiókba
 const STORAGE_KEY = 'cleanmark-bookmarks';
 
 function loadBookmarks() {
@@ -424,7 +464,8 @@ function SourceIcon({ source, className = 'w-4 h-4' }) {
 // 5. FŐ ALKALMAZÁS KOMPONENS
 // ==========================================
 export default function App() {
-  // Könyvjelzők (localStorage-ból) és értesítés
+  // Bejelentkezett felhasználó (null = csak helyi tárolás), könyvjelzők és értesítés
+  const [user, setUser] = useState(null);
   const [bookmarks, setBookmarks] = useState(loadBookmarks);
   const [toast, setToast] = useState(null);
 
@@ -459,22 +500,104 @@ export default function App() {
     }, 3200);
   };
 
-  // Módosítás alkalmazása: rendezés (legújabb elöl), állapot és localStorage frissítése
-  const updateBookmarks = (updater) => {
-    const next = updater(loadBookmarks());
-    next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const sortNewestFirst = (items) => items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  // Helyi módosítás alkalmazása (bejelentkezés nélkül): állapot és localStorage frissítése
+  const updateLocalBookmarks = (updater) => {
+    const next = sortNewestFirst(updater(loadBookmarks()));
     persistBookmarks(next);
     setBookmarks(next);
   };
 
-  // Szinkronizálás más böngészőfülekkel
+  // Firestore írás hibakezeléssel. Nem várjuk meg a szerver visszaigazolását,
+  // mert offline csak a kapcsolat visszatérésekor teljesülne; a lista a helyi gyorsítótárból frissül.
+  const cloudWrite = (promise) => {
+    promise.catch((err) => {
+      console.error('Firestore írási hiba:', err);
+      showNotification('Nem sikerült menteni a felhőbe.', 'error');
+    });
+  };
+
+  const addBookmarks = (newItems) => {
+    if (!user) {
+      updateLocalBookmarks((items) => [...newItems, ...items]);
+      return;
+    }
+    const batch = writeBatch(db);
+    newItems.forEach((bm) => batch.set(doc(bookmarksCol(user.uid), bm.id), bm));
+    cloudWrite(batch.commit());
+  };
+
+  const patchBookmark = (id, changes) => {
+    if (!user) {
+      updateLocalBookmarks((items) => items.map((bm) => (bm.id === id ? { ...bm, ...changes } : bm)));
+      return;
+    }
+    cloudWrite(updateDoc(doc(bookmarksCol(user.uid), id), changes));
+  };
+
+  const removeBookmark = (id) => {
+    if (!user) {
+      updateLocalBookmarks((items) => items.filter((bm) => bm.id !== id));
+      return;
+    }
+    cloudWrite(deleteDoc(doc(bookmarksCol(user.uid), id)));
+  };
+
+  // Bejelentkezési állapot figyelése
+  useEffect(() => onAuthStateChanged(auth, setUser), []);
+
+  const handleSignIn = async () => {
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        console.error('Bejelentkezési hiba:', err);
+        showNotification('Nem sikerült a bejelentkezés.', 'error');
+      }
+    }
+  };
+
+  const handleSignOut = () => {
+    signOut(auth);
+    showNotification('Kijelentkeztél. A felhőben tárolt könyvjelzők megmaradnak.', 'info');
+  };
+
+  // Adatforrás: bejelentkezve Firestore (élő szinkron), egyébként localStorage
   useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === STORAGE_KEY) setBookmarks(loadBookmarks());
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
+    if (!user) {
+      setBookmarks(loadBookmarks());
+      const onStorage = (e) => {
+        if (e.key === STORAGE_KEY) setBookmarks(loadBookmarks());
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    }
+
+    // Első belépéskor a helyben mentett könyvjelzők feltöltése a fiókba
+    const local = loadBookmarks();
+    if (local.length > 0) {
+      const batch = writeBatch(db);
+      local.forEach((bm) => batch.set(doc(bookmarksCol(user.uid), bm.id), bm));
+      batch.commit()
+        .then(() => {
+          persistBookmarks([]);
+          showNotification(`${local.length} helyi könyvjelző feltöltve a fiókodba.`);
+        })
+        .catch((err) => console.error('Helyi könyvjelzők feltöltése sikertelen:', err));
+    }
+
+    return onSnapshot(
+      bookmarksCol(user.uid),
+      (snapshot) => {
+        setBookmarks(sortNewestFirst(snapshot.docs.map((d) => ({ ...d.data(), id: d.id }))));
+      },
+      (err) => {
+        console.error('Firestore olvasási hiba:', err);
+        showNotification('Nem sikerült betölteni a könyvjelzőket.', 'error');
+      }
+    );
+  }, [user]);
 
   // URL paraméterből érkező gyorsmentés kezelése (pl. Bookmarklet vagy iOS Rövidítés hívásakor)
   useEffect(() => {
@@ -483,7 +606,11 @@ export default function App() {
       const sharedUrl = params.get('add_url') || params.get('url');
       if (sharedUrl) {
         setRawUrlInput(sharedUrl);
+        if (params.get('title')) setCustomTitle(params.get('title'));
+        if (params.get('tags')) setTagsInput(params.get('tags'));
         setShowAdvancedAdd(true);
+        // Paraméterek eltávolítása, hogy újratöltéskor ne kerüljön be újra
+        window.history.replaceState({}, '', window.location.pathname);
         showNotification('URL átvéve a megosztásból és megtisztítva!', 'info');
       }
     } catch (_) {}
@@ -574,7 +701,7 @@ export default function App() {
     };
 
     try {
-      updateBookmarks((items) => [newBookmark, ...items]);
+      addBookmarks([newBookmark]);
 
       // Űrlap ürítése
       setRawUrlInput('');
@@ -619,7 +746,7 @@ export default function App() {
           now -= 60000;
         }
       }
-      updateBookmarks((items) => [...demos, ...items]);
+      addBookmarks(demos);
       showNotification('5 db piszkos teszt URL megtisztítva és elmentve!');
     } catch (err) {
       console.error(err);
@@ -628,10 +755,6 @@ export default function App() {
   };
 
   // Könyvjelző módosítása (Kedvenc, Olvasott, Szerkesztés)
-  const patchBookmark = (id, changes) => {
-    updateBookmarks((items) => items.map((bm) => (bm.id === id ? { ...bm, ...changes } : bm)));
-  };
-
   const handleToggleFavorite = (bm) => {
     patchBookmark(bm.id, { isFavorite: !bm.isFavorite });
   };
@@ -642,7 +765,7 @@ export default function App() {
 
   const handleDeleteBookmark = (id) => {
     if (!window.confirm('Biztosan törlöd ezt a könyvjelzőt?')) return;
-    updateBookmarks((items) => items.filter((bm) => bm.id !== id));
+    removeBookmark(id);
     showNotification('Könyvjelző törölve.', 'info');
   };
 
@@ -890,6 +1013,30 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
               <Puzzle className="w-4 h-4" />
               <span>Chrome Plugin & Mobil</span>
             </button>
+
+            {user ? (
+              <button
+                onClick={handleSignOut}
+                title={`Bejelentkezve: ${user.email} – kattints a kijelentkezéshez`}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium bg-slate-800/70 text-slate-300 hover:bg-slate-800 transition-all"
+              >
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="" referrerPolicy="no-referrer" className="w-5 h-5 rounded-full" />
+                ) : (
+                  <Cloud className="w-4 h-4 text-emerald-400" />
+                )}
+                <LogOut className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                onClick={handleSignIn}
+                title="Jelentkezz be, hogy a könyvjelzőid minden eszközödön szinkronban legyenek"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-medium bg-white text-slate-900 hover:bg-slate-200 transition-all"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Belépés</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
