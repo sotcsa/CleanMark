@@ -8,13 +8,13 @@ A felület magyar nyelvű.
 
 | Rész | Hely | Leírás |
 |---|---|---|
-| Webalkalmazás | `src/` | React 19 + Vite 8 + Tailwind CSS 4, Firebase (Auth + Firestore) háttérrel. A teljes logika a `src/App.jsx` fájlban van. |
+| Webalkalmazás | `src/` | React 19 + Vite 8 + Tailwind CSS 4. Az adatokat a böngésző `localStorage`-ában tárolja, nincs szerver. A teljes logika a `src/App.jsx` fájlban van. |
 | Chrome-bővítmény | `chrome-extension/` | Manifest V3 popup, build nélkül betölthető. Önálló, nem kommunikál a webalkalmazással. |
 | Mobil | – | Nincs natív app. A webalkalmazás reszponzív (mobilon alsó navigáció), és bookmarklettel vagy iOS Rövidítéssel is használható (lásd lent). |
 
 ### Webalkalmazás fülei
 
-- **Könyvjelzők**: lista, keresés, szűrés forrás / címke / állapot (kedvenc, olvasatlan, tisztított) szerint, szerkesztés, törlés, „röntgen” nézet az eltávolított paraméterekről.
+- **Könyvjelzők**: lista, keresés, szűrés forrás / címke / állapot (kedvenc, olvasatlan, tisztított) szerint, szerkesztés, törlés (megerősítéssel), „röntgen” nézet az eltávolított paraméterekről, JSON export.
 - **Tisztító**: URL beillesztése, valós idejű elemzés és tisztítás, mentés. Mintalinkek a gyors kipróbáláshoz.
 - **Plugin**: telepítési útmutató a Chrome-bővítményhez, bemásolható bővítménykód és bookmarklet, mobilos tippek.
 
@@ -26,7 +26,7 @@ A felület magyar nyelvű.
 2. **Kicsomagolt bővítmény betöltése**, majd válaszd ki a `chrome-extension/` mappát.
 3. A bővítmény ikonjára kattintva a popup megtisztítja az aktuális fül URL-jét. A **Mentés** gomb a vágólapra másolja a tiszta linket, és elmenti a könyvjelzőt a `chrome.storage.local`-ba.
 
-Jogosultságok: `activeTab`, `storage`, `clipboardWrite`. A manifestben nincs ikon megadva.
+Jogosultságok: `activeTab`, `storage`, `clipboardWrite`. A manifestben nincs ikon megadva. Nem http(s) oldalakon (pl. `chrome://`) a mentés le van tiltva.
 
 ### Webalkalmazás
 
@@ -40,19 +40,9 @@ npm run preview   # a build kiszolgálása helyben
 npm run lint      # oxlint
 ```
 
-> **Figyelem: a webalkalmazás jelenleg nem indul el** az alábbi ismert hibák miatt.
-
-## Ismert hibák
-
-1. **Tailwind beállítás v3-as, a telepített csomag v4-es.** A `postcss.config.js` a `tailwindcss` plugint használja, a `src/index.css` pedig `@tailwind base/components/utilities` direktívákat. A build ezzel a hibával áll le:
-   `It looks like you're trying to use tailwindcss directly as a PostCSS plugin…`
-   Javítás: `npm i -D @tailwindcss/postcss`, a `postcss.config.js`-ben `'@tailwindcss/postcss': {}`, az `index.css`-ben `@import "tailwindcss";`. A `tailwind.config.js` és az `autoprefixer` v4 alatt már nem szükséges.
-2. **Hiányzik a `firebase` függőség.** Az `App.jsx` importálja a `firebase/app`, `firebase/auth` és `firebase/firestore` modult, de a csomag nincs a `package.json`-ban (`npm i firebase`).
-3. **Nincs Firebase konfiguráció.** A kód a `__firebase_config`, `__app_id` és `__initial_auth_token` globális változókat várja (ezeket az a sandbox-környezet adta, ahol a kód eredetileg készült). Helyben üres konfigurációval indul, így a bejelentkezés és a mentés nem működik. Saját Firebase projekt kell hozzá (Anonymous Auth + Firestore), és a konfigurációt be kell kötni, például `import.meta.env` változókon keresztül.
-
 ## Adattárolás
 
-- **Webalkalmazás:** Firestore, a `artifacts/{appId}/users/{uid}/bookmarks` gyűjteményben. Az alapértelmezett `appId` értéke `cleanmark-bookmark-app`. A felhasználó névtelen (anonymous) bejelentkezéssel kap azonosítót.
+- **Webalkalmazás:** böngésző `localStorage`, `cleanmark-bookmarks` kulccsal (JSON tömb). Az adatok csak abban a böngészőben érhetők el, ahol mentetted őket; böngészőadatok törlésekor elvesznek, ezért érdemes időnként JSON-ba exportálni. Ugyanazon böngésző több fülén automatikusan szinkronban maradnak.
 - **Chrome-bővítmény:** `chrome.storage.local`, `bookmarks` kulccsal. Nincs szinkronizálva a webalkalmazással.
 
 ## Mobil és gyorsmentés
@@ -67,13 +57,12 @@ npm run lint      # oxlint
 chrome-extension/   manifest.json, popup.html, popup.js
 public/             favicon.svg, icons.svg
 src/
-  App.jsx           teljes alkalmazás: URL-elemző motor, Firebase, UI
+  App.jsx           teljes alkalmazás: URL-elemző motor, localStorage tárolás, UI
   main.jsx          React belépési pont
-  index.css         Tailwind direktívák
+  index.css         Tailwind import (@import "tailwindcss")
 index.html
 vite.config.js
-postcss.config.js
-tailwind.config.js
+postcss.config.js   Tailwind 4 (@tailwindcss/postcss)
 .oxlintrc.json
 ```
 
@@ -82,6 +71,7 @@ tailwind.config.js
 Az `App.jsx` tetején találhatók:
 
 - `TRACKING_PARAMS_EXACT`: pontos egyezéssel törölt paraméterek (pl. `fbclid`, `gclid`, `msclkid`, `ttclid`, `mc_cid`, `si`, `ref`, `spm` …).
+- `TRACKING_PARAMS_BY_HOST`: csak adott oldalakon törölt paraméterek (YouTube: `feature`, `pp`; X/Twitter: `s`, `t`; Amazon: `ref`). Máshol ezeknek tartalmi jelentésük lehet (pl. WordPress `?s=` keresés), ezért ott megmaradnak.
 - `TRACKING_PREFIXES`: előtaggal törölt paraméterek (`utm_`, `hsa_`, `mtm_`, `pk_`, `piwik_`, `gad_`, `__`).
 - `SOURCES`: a felismert források és a hozzájuk tartozó színek.
 

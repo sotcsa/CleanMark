@@ -40,31 +40,32 @@ import {
   Terminal
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  signInAnonymously,
-  signInWithCustomToken,
-  onAuthStateChanged
-} from 'firebase/auth';
-import {
-  getFirestore,
-  collection,
-  doc,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot
-} from 'firebase/firestore';
+// ==========================================
+// 1. HELYI TÁROLÁS (localStorage)
+// ==========================================
+const STORAGE_KEY = 'cleanmark-bookmarks';
 
-// ==========================================
-// 1. FIREBASE INICIALIZÁLÁS (Környezeti változókból)
-// ==========================================
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'cleanmark-bookmark-app';
+function loadBookmarks() {
+  try {
+    const items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistBookmarks(items) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  } catch (err) {
+    console.error('localStorage írási hiba:', err);
+  }
+}
+
+const newId = () =>
+  typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 // ==========================================
 // 2. FORRÁS DEFINÍCIÓK ÉS SZÍNEK
@@ -84,16 +85,23 @@ const SOURCES = {
   direct: { id: 'direct', label: 'Közvetlen / Egyéb', color: 'bg-slate-600/20 text-slate-300 border-slate-500/40', badge: 'bg-slate-600 text-white' }
 };
 
-// Ismert nyomkövető és forrás paraméterek listája, amelyeket eltávolítunk
+// Ismert nyomkövető és forrás paraméterek listája, amelyeket eltávolítunk (kisbetűvel!)
 const TRACKING_PARAMS_EXACT = new Set([
   'fbclid', 'gclid', 'dclid', 'gbraid', 'wbraid', 'msclkid', 'twclid',
   'igshid', 'igsh', 'ttclid', 'li_fat_id', 'mc_cid', 'mc_eid',
-  'oly_enc_id', 'oly_anon_id', '_hsenc', '_hsmi', 'hsCtaTracking',
+  'oly_enc_id', 'oly_anon_id', '_hsenc', '_hsmi', 'hsctatracking',
   'vero_id', 'vero_conv', 'mkt_tok', 'rb_clickid', 's_kwcid',
-  'wickedid', 'yclid', '_openstat', 'si', 'feature', 'ref', 'ref_src',
-  'ref_url', 'source', 's', 'spm', 'scm', 'aff_platform', 'aff_trace_key',
+  'wickedid', 'yclid', '_openstat', 'si', 'ref_src',
+  'ref_url', 'spm', 'scm', 'aff_platform', 'aff_trace_key',
   'share_id', 'is_from_webapp', 'sender_device', 'ibr', 'at_medium', 'at_campaign'
 ]);
+
+// Csak bizonyos oldalakon követőkód paraméterek (máshol tartalmi jelentésük lehet, pl. WordPress ?s= keresés)
+const TRACKING_PARAMS_BY_HOST = [
+  { hosts: ['youtube.com', 'youtu.be'], params: ['feature', 'pp'] },
+  { hosts: ['twitter.com', 'x.com'], params: ['s', 't'] },
+  { hosts: ['amazon.'], params: ['ref', 'ref_'] }
+];
 
 const TRACKING_PREFIXES = ['utm_', 'hsa_', 'mtm_', 'pk_', 'piwik_', 'gad_', '__'];
 
@@ -247,7 +255,7 @@ function analyzeAndCleanUrl(rawInput) {
     } else if (params.has('igshid') || params.has('igsh') || utmSource.includes('instagram') || utmSource.includes('ig_')) {
       detectedSource = 'instagram';
       detectionReason = params.has('igshid') || params.has('igsh') ? 'Instagram megosztás azonosító (igshid)' : `utm_source=${utmSource}`;
-    } else if (params.has('ttclid') || utmSource.includes('tiktok') || params.get(' sender_device')) {
+    } else if (params.has('ttclid') || utmSource.includes('tiktok') || params.has('sender_device')) {
       detectedSource = 'tiktok';
       detectionReason = params.has('ttclid') ? 'ttclid (TikTok) azonosító' : 'TikTok megosztási paraméter';
     } else if (params.has('twclid') || utmSource.includes('twitter') || utmSource === 'x') {
@@ -316,10 +324,13 @@ function analyzeAndCleanUrl(rawInput) {
 
   // 4. LÉPÉS: Követő paraméterek (fbclid, gclid, utm_*, stb.) kiszedése az URL-ből
   // Megjegyzés: YouTube-nál a ?v= és ?t= paramétereket MEGTARTJUK, csak a ?si= és ?feature=shared jellegűeket töröljük!
+  const hostSpecificParams = TRACKING_PARAMS_BY_HOST
+    .filter(({ hosts }) => hosts.some((h) => finalHost === h || finalHost.endsWith('.' + h) || (h.endsWith('.') && finalHost.includes(h))))
+    .flatMap(({ params: p }) => p);
   const keysToDelete = [];
-  for (const key of parsed.searchParams.keys()) {
+  for (const key of new Set(parsed.searchParams.keys())) {
     const lowerKey = key.toLowerCase();
-    const isExactMatch = TRACKING_PARAMS_EXACT.has(lowerKey);
+    const isExactMatch = TRACKING_PARAMS_EXACT.has(lowerKey) || hostSpecificParams.includes(lowerKey);
     const isPrefixMatch = TRACKING_PREFIXES.some((prefix) => lowerKey.startsWith(prefix));
 
     if (isExactMatch || isPrefixMatch) {
@@ -413,10 +424,8 @@ function SourceIcon({ source, className = 'w-4 h-4' }) {
 // 5. FŐ ALKALMAZÁS KOMPONENS
 // ==========================================
 export default function App() {
-  // Auth & Firestore állapotok
-  const [user, setUser] = useState(null);
-  const [bookmarks, setBookmarks] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Könyvjelzők (localStorage-ból) és értesítés
+  const [bookmarks, setBookmarks] = useState(loadBookmarks);
   const [toast, setToast] = useState(null);
 
   // Navigáció / Nézetek ('bookmarks' | 'cleaner' | 'plugin')
@@ -450,51 +459,22 @@ export default function App() {
     }, 3200);
   };
 
-  // 1. Firebase Auth Inicializálás (RULE 3 szerint)
+  // Módosítás alkalmazása: rendezés (legújabb elöl), állapot és localStorage frissítése
+  const updateBookmarks = (updater) => {
+    const next = updater(loadBookmarks());
+    next.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    persistBookmarks(next);
+    setBookmarks(next);
+  };
+
+  // Szinkronizálás más böngészőfülekkel
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error('Auth hiba:', err);
-      }
+    const onStorage = (e) => {
+      if (e.key === STORAGE_KEY) setBookmarks(loadBookmarks());
     };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
-
-  // 2. Firestore Adatok szinkronizálása (RULE 1, 2, 3 szerint)
-  useEffect(() => {
-    if (!user) return;
-
-    const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'bookmarks');
-    const unsubscribe = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const items = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }));
-        // Memóriában történő rendezés (legújabb elöl)
-        items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        setBookmarks(items);
-        setLoading(false);
-      },
-      (error) => {
-        console.error('Firestore olvasási hiba:', error);
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user]);
 
   // URL paraméterből érkező gyorsmentés kezelése (pl. Bookmarklet vagy iOS Rövidítés hívásakor)
   useEffect(() => {
@@ -560,13 +540,9 @@ export default function App() {
     }
   };
 
-  // Könyvjelző mentése Firestore-ba
-  const handleSaveBookmark = async (e) => {
+  // Könyvjelző mentése
+  const handleSaveBookmark = (e) => {
     if (e) e.preventDefault();
-    if (!user) {
-      showNotification('Kérlek várj a csatlakozásra...', 'error');
-      return;
-    }
     if (!urlAnalysis || !urlAnalysis.isValid) {
       showNotification('Kérlek adj meg egy érvényes webcímet (URL)!', 'error');
       return;
@@ -580,6 +556,7 @@ export default function App() {
       .filter(Boolean);
 
     const newBookmark = {
+      id: newId(),
       cleanUrl: urlAnalysis.cleanUrl,
       originalUrl: urlAnalysis.originalUrl,
       title: finalTitle,
@@ -597,8 +574,7 @@ export default function App() {
     };
 
     try {
-      const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'bookmarks');
-      await addDoc(colRef, newBookmark);
+      updateBookmarks((items) => [newBookmark, ...items]);
 
       // Űrlap ürítése
       setRawUrlInput('');
@@ -616,15 +592,15 @@ export default function App() {
   };
 
   // Demó könyvjelzők betöltése 1 kattintással
-  const handleLoadDemoBookmarks = async () => {
-    if (!user) return;
+  const handleLoadDemoBookmarks = () => {
     try {
-      const colRef = collection(db, 'artifacts', appId, 'users', user.uid, 'bookmarks');
+      const demos = [];
       let now = Date.now();
       for (const sample of SAMPLE_DIRTY_URLS) {
         const analysis = analyzeAndCleanUrl(sample.rawUrl);
         if (analysis && analysis.isValid) {
-          await addDoc(colRef, {
+          demos.push({
+            id: newId(),
             cleanUrl: analysis.cleanUrl,
             originalUrl: analysis.originalUrl,
             title: sample.suggestedTitle,
@@ -643,6 +619,7 @@ export default function App() {
           now -= 60000;
         }
       }
+      updateBookmarks((items) => [...demos, ...items]);
       showNotification('5 db piszkos teszt URL megtisztítva és elmentve!');
     } catch (err) {
       console.error(err);
@@ -651,34 +628,32 @@ export default function App() {
   };
 
   // Könyvjelző módosítása (Kedvenc, Olvasott, Szerkesztés)
-  const handleToggleFavorite = async (bm) => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'bookmarks', bm.id);
-    await updateDoc(docRef, { isFavorite: !bm.isFavorite });
+  const patchBookmark = (id, changes) => {
+    updateBookmarks((items) => items.map((bm) => (bm.id === id ? { ...bm, ...changes } : bm)));
   };
 
-  const handleToggleRead = async (bm) => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'bookmarks', bm.id);
-    await updateDoc(docRef, { isRead: !bm.isRead });
+  const handleToggleFavorite = (bm) => {
+    patchBookmark(bm.id, { isFavorite: !bm.isFavorite });
   };
 
-  const handleDeleteBookmark = async (id) => {
-    if (!user) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'bookmarks', id);
-    await deleteDoc(docRef);
+  const handleToggleRead = (bm) => {
+    patchBookmark(bm.id, { isRead: !bm.isRead });
+  };
+
+  const handleDeleteBookmark = (id) => {
+    if (!window.confirm('Biztosan törlöd ezt a könyvjelzőt?')) return;
+    updateBookmarks((items) => items.filter((bm) => bm.id !== id));
     showNotification('Könyvjelző törölve.', 'info');
   };
 
-  const handleUpdateBookmark = async (e) => {
+  const handleUpdateBookmark = (e) => {
     e.preventDefault();
-    if (!user || !editingBookmark) return;
-    const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'bookmarks', editingBookmark.id);
+    if (!editingBookmark) return;
     const updatedTags = typeof editingBookmark.tagsString === 'string'
       ? editingBookmark.tagsString.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
       : editingBookmark.tags || [];
 
-    await updateDoc(docRef, {
+    patchBookmark(editingBookmark.id, {
       title: editingBookmark.title.trim() || editingBookmark.domain,
       cleanUrl: editingBookmark.cleanUrl.trim(),
       source: editingBookmark.source,
@@ -1349,11 +1324,7 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             </div>
 
             {/* KÖNYVJELZŐ KÁRTYÁK RÁCSA */}
-            {loading ? (
-              <div className="text-center py-16 text-slate-400 text-sm">
-                Könyvjelzők szinkronizálása...
-              </div>
-            ) : filteredBookmarks.length === 0 ? (
+            {filteredBookmarks.length === 0 ? (
               <div className="bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl p-10 text-center space-y-4">
                 <div className="w-12 h-12 rounded-2xl bg-slate-800/80 text-emerald-400 flex items-center justify-center mx-auto">
                   <ShieldCheck className="w-6 h-6" />
