@@ -24,11 +24,40 @@ A felület magyar nyelvű.
 
 ### Chrome-bővítmény
 
-1. Nyisd meg a `chrome://extensions` oldalt, és kapcsold be a **Fejlesztői módot**.
-2. **Kicsomagolt bővítmény betöltése**, majd válaszd ki a `chrome-extension/` mappát.
-3. A bővítmény ikonjára kattintva a popup megtisztítja az aktuális fül URL-jét. A **Másolás és mentés** gomb a vágólapra másolja a tiszta linket, és új fülön megnyitja a webappot (`?add_url=…&title=…&tags=…`), ahol egy kattintással menthető. Így a bővítményből mentett linkek is a közös, szinkronizált listába kerülnek.
+A bővítmény nincs fent a Chrome Web Store-ban, ezért „kicsomagolt bővítményként” kell betölteni. Buildelni nem kell, a `chrome-extension/` mappa tartalma közvetlenül betölthető. Bármely Chromium-alapú böngészőben működik (Chrome, Edge, Brave, Arc, Opera).
 
-Jogosultságok: `activeTab`, `clipboardWrite`. A manifestben nincs ikon megadva. Nem http(s) oldalakon (pl. `chrome://`) a mentés le van tiltva.
+**1. A kód letöltése** (ha még nincs meg a gépeden):
+
+```bash
+git clone https://github.com/sotcsa/CleanMark.git
+```
+
+Vagy a GitHub-oldalon **Code → Download ZIP**, majd a ZIP kicsomagolása. A mappát ne töröld és ne helyezd át telepítés után, mert a Chrome onnan tölti be a bővítményt.
+
+**2. Telepítés:**
+
+1. Nyisd meg a `chrome://extensions` oldalt (Edge-ben `edge://extensions`, Brave-ben `brave://extensions`).
+2. Jobb felső sarokban kapcsold be a **Fejlesztői mód** (Developer mode) kapcsolót.
+3. Kattints a **Kicsomagolt bővítmény betöltése** (Load unpacked) gombra, és válaszd ki a repó `chrome-extension/` mappáját (azt, amelyikben a `manifest.json` van, ne a repó gyökerét).
+4. A bővítmény megjelenik a listában „CleanMark - URL Cleaner & Bookmark” néven.
+5. Kattints a címsor melletti puzzle (Bővítmények) ikonra, és a CleanMark melletti gombostűvel tűzd ki az eszköztárra.
+
+**3. Használat:** bármely http(s) oldalon a bővítmény ikonjára kattintva a popup megtisztítja az aktuális fül URL-jét. A **Másolás és mentés** gomb a vágólapra másolja a tiszta linket, és új fülön megnyitja a webappot (`?add_url=…&title=…&tags=…`), ahol egy kattintással menthető. Így a bővítményből mentett linkek is a közös, szinkronizált listába kerülnek. A mentéshez a webappban be kell jelentkezni Google-fiókkal, különben a link csak az adott böngésző `localStorage`-ába kerül.
+
+**4. Frissítés:** `git pull` (vagy új ZIP letöltése ugyanabba a mappába), majd a `chrome://extensions` oldalon a CleanMark kártyáján a **frissítés** (körkörös nyíl) ikon. Ugyanez kell, ha a `chrome-extension/` fájljait helyben módosítod.
+
+**Eltávolítás:** `chrome://extensions` → CleanMark → **Eltávolítás**.
+
+Jogosultságok: `activeTab`, `clipboardWrite`. A manifestben nincs ikon megadva, ezért az eszköztáron a Chrome alapértelmezett, betűs ikonja látszik. Nem http(s) oldalakon (pl. `chrome://`, Chrome Web Store) a mentés le van tiltva. Mobil Chrome-ban bővítmény nem telepíthető, ott a bookmarkletet vagy az iOS Rövidítést használd (lásd lent).
+
+#### Közzététel a Chrome Web Store-ban (opcionális)
+
+Ha mások számára is egy kattintással telepíthetővé akarod tenni:
+
+1. Adj hozzá ikonokat (16, 48, 128 px PNG) a `manifest.json` `icons` mezőjében. A Store ezt megköveteli.
+2. Csomagold be a mappa *tartalmát* ZIP-be: `cd chrome-extension && zip -r ../cleanmark-extension.zip .`
+3. Regisztrálj a [Chrome Web Store Developer Dashboardon](https://chrome.google.com/webstore/devconsole) (egyszeri 5 USD díj), töltsd fel a ZIP-et, add meg a leírást, képernyőképeket és az adatvédelmi nyilatkozatot, majd küldd be ellenőrzésre.
+4. Új verzió kiadásakor növeld a `manifest.json` `version` mezőjét, és töltsd fel az új ZIP-et.
 
 ### Webalkalmazás
 
